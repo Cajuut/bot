@@ -1,0 +1,21 @@
+# Flutter
+flutter_ui/build/
+flutter_ui/.dart_tool/
+flutter_ui/.packages
+flutter_ui/.pub-cache/
+flutter_ui/.pub/
+flutter_ui/ios/Flutter/Generated.xcconfig
+flutter_ui/ios/Flutter/flutter_export_environment.sh
+
+# Node
+node_bot/node_modules/
+node_bot/npm-debug.log
+
+# Python
+python_bot/__pycache__/
+python_bot/venv/
+python_bot/*.pyc
+
+# OS
+.DS_Store
+Thumbs.db
