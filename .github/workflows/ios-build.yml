@@ -16,7 +16,7 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-          flutter-version: '3.27.4' # or latest
+          # specific version removed to use latest stable
           
       - name: Install dependencies
         run: |
