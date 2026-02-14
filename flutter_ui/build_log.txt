@@ -1,0 +1,6 @@
+Launching lib\main.dart on Windows in debug mode...
+Building Windows application...                                 
+lib/main.dart(125,31): error G4127D1E8: The getter 'isRunning' isn't defined for the type 'DiscordBot'. [C:\Users\mikan\.gemini\antigravity\scratch\discord_bot_project\flutter_ui\build\windows\x64\flutter\flutter_assemble.vcxproj]
+C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Microsoft\VC\v180\Microsoft.CppCommon.targets(254,5): error MSB8066: Custom build for 'C:\Users\mikan\.gemini\antigravity\scratch\discord_bot_project\flutter_ui\build\windows\x64\CMakeFiles\a857d98f871c0671aa2d62b2ffc31dcd\flutter_windows.dll.rule;C:\Users\mikan\.gemini\antigravity\scratch\discord_bot_project\flutter_ui\build\windows\x64\CMakeFiles\f5229c56951a50892bcfff7a022a18d5\flutter_assemble.rule' exited with code 1. [C:\Users\mikan\.gemini\antigravity\scratch\discord_bot_project\flutter_ui\build\windows\x64\flutter\flutter_assemble.vcxproj]
+Building Windows application...                                     8.8s
+Error: Build process failed.

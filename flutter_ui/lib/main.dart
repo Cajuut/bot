@@ -1,7 +1,5 @@
-import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'discord_bot.dart';
 
 void main() {
   runApp(const MyApp());
@@ -13,12 +11,12 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Discord Bot Manager',
+      title: 'Discord Bot Controller',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFF5865F2),
-          brightness: Brightness.dark, // Discord style is usually dark
+          brightness: Brightness.dark,
         ),
         useMaterial3: true,
       ),
@@ -35,87 +33,38 @@ class BotControlPage extends StatefulWidget {
 }
 
 class _BotControlPageState extends State<BotControlPage> {
-  // Process Management
-  Process? _process;
-  String _currentMode = 'Node'; // 'Node' or 'Python'
-  
-  // Remote Connection
-  IO.Socket? _socket;
-  final TextEditingController _ipController = TextEditingController(text: 'localhost');
-  
+  // Bot instance
+  DiscordBot? _bot;
+  bool _botRunning = false;
+
   // UI State
   final List<String> _logs = [];
   final TextEditingController _tokenController = TextEditingController();
-  final TextEditingController _codeController = TextEditingController();
+  final TextEditingController _webhookController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   int _tabIndex = 0;
-  
-  bool get _isLocalRunning => _process != null;
-  bool get _isRemoteConnected => _socket != null && _socket!.connected;
 
-  @override
-  void initState() {
-    super.initState();
-    if (!Platform.isWindows && !Platform.isLinux && !Platform.isMacOS) {
-       _ipController.text = '192.168.1.100'; 
-    }
-    _loadCode();
-  }
+  // Custom commands (user-defined)
+  final List<Map<String, String>> _customCommands = [];
+  final TextEditingController _cmdNameController = TextEditingController();
+  final TextEditingController _cmdResponseController = TextEditingController();
 
   @override
   void dispose() {
-    _process?.kill();
-    _socket?.disconnect();
+    _bot?.stop();
     _tokenController.dispose();
-    _ipController.dispose();
-    _codeController.dispose();
+    _webhookController.dispose();
     _scrollController.dispose();
+    _cmdNameController.dispose();
+    _cmdResponseController.dispose();
     super.dispose();
-  }
-
-  String _getScriptPath() {
-    if (_currentMode == 'Node') {
-      final devPath = r'C:\Users\mikan\.gemini\antigravity\scratch\discord_bot_project\node_bot\index.js';
-      return File(devPath).existsSync() ? devPath : 'node_bot/index.js';
-    } else {
-      final devPath = r'C:\Users\mikan\.gemini\antigravity\scratch\discord_bot_project\python_bot\bot.py';
-      return File(devPath).existsSync() ? devPath : 'python_bot/bot.py';
-    }
-  }
-
-  Future<void> _loadCode() async {
-    try {
-      final path = _getScriptPath();
-      final file = File(path);
-      if (await file.exists()) {
-        final content = await file.readAsString();
-        setState(() {
-          _codeController.text = content;
-        });
-      }
-    } catch (e) {
-      _addLog('Failed to load code: $e');
-    }
-  }
-
-  Future<void> _saveCode() async {
-    try {
-      final path = _getScriptPath();
-      final file = File(path);
-      await file.writeAsString(_codeController.text);
-      _addLog('Code saved to $path');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Code saved successfully!')),
-      );
-    } catch (e) {
-      _addLog('Failed to save code: $e');
-    }
   }
 
   void _addLog(String message) {
     if (!mounted) return;
     setState(() {
       _logs.add(message);
+      if (_logs.length > 500) _logs.removeAt(0);
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
@@ -128,248 +77,230 @@ class _BotControlPageState extends State<BotControlPage> {
     });
   }
 
-  // --- Local Bot Logic ---
-
-  void _sendRemoteStop() {
-    if (_socket != null && _socket!.connected) {
-       _socket!.emit('command', 'stop');
-    }
-  }
-
-  Future<void> _startLocalBot() async {
-    if (_isLocalRunning) return;
-    
-    try {
-      _addLog('Starting local $_currentMode bot...');
-      
-      String executable = _currentMode == 'Node' ? 'node' : 'python';
-      String scriptPath = _getScriptPath();
-
-      _process = await Process.start(
-        executable, 
-        [scriptPath],
-        runInShell: true,
+  void _startBot() {
+    final token = _tokenController.text.trim();
+    if (token.isEmpty) {
+      _addLog('[Error] Tokenを入力してください');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Tokenを入力してください')),
       );
-
-      _addLog('$_currentMode process started (PID: ${_process!.pid})');
-
-      _process!.stdout.transform(utf8.decoder).listen((data) => _addLog('[STDOUT] $data'));
-      _process!.stderr.transform(utf8.decoder).listen((data) => _addLog('[STDERR] $data'));
-      _process!.exitCode.then((code) {
-        _addLog('Process exited with code $code');
-        if (mounted) setState(() => _process = null);
-      });
-      
-      setState(() {});
-      
-      String port = _currentMode == 'Node' ? '3000' : '3001';
-      _connectToRemote('http://localhost:$port');
-      
-    } catch (e) {
-      _addLog('Failed to start $_currentMode: $e');
-      setState(() => _process = null);
+      return;
     }
+
+    _bot = DiscordBot(
+      token: token,
+      webhookUrl: _webhookController.text.trim(),
+      onLog: _addLog,
+      onStatusChanged: (running) {
+        if (mounted) setState(() => _botRunning = running);
+      },
+    );
+
+    // Register custom commands
+    for (final cmd in _customCommands) {
+      final name = cmd['name']!;
+      final response = cmd['response']!;
+      _bot!.registerCommand(name, (msg) async {
+        await _bot!.sendMessage(msg['channel_id'], response);
+      });
+    }
+
+    _bot!.start();
   }
 
-  void _stopLocalBot() {
-    if (_process != null) {
-      final pid = _process!.pid;
-      _addLog('Forcing stop for process tree (PID: $pid)...');
-      
-      if (Platform.isWindows) {
-        // Force kill the process and all its children
-        Process.run('taskkill', ['/F', '/T', '/PID', pid.toString()]);
-      } else {
-        _process!.kill(ProcessSignal.sigterm);
-      }
-      
-      // Also send socket kill command as backup
-      _sendRemoteStop();
-      
-      _process = null;
-      setState(() {});
-    }
+  void _stopBot() {
+    _bot?.stop();
   }
 
-  // --- Remote Bot Logic (iOS/Android) ---
+  void _addCustomCommand() {
+    final name = _cmdNameController.text.trim().toLowerCase();
+    final response = _cmdResponseController.text.trim();
+    if (name.isEmpty || response.isEmpty) return;
 
-  void _connectRemote() {
-    String ip = _ipController.text.trim();
-    if (ip.isEmpty) return;
-    if (!ip.startsWith('http')) {
-      String port = _currentMode == 'Node' ? '3000' : '3001';
-      ip = 'http://$ip:$port';
+    setState(() {
+      _customCommands.add({'name': name, 'response': response});
+    });
+
+    // If bot is running, register it now
+    if (_bot != null && _bot!.isRunning) {
+      _bot!.registerCommand(name, (msg) async {
+        await _bot!.sendMessage(msg['channel_id'], response);
+      });
     }
-    _connectToRemote(ip);
+
+    _addLog('[System] コマンド追加: !$name → $response');
+    _cmdNameController.clear();
+    _cmdResponseController.clear();
   }
 
-  void _connectToRemote(String url) {
-    if (_socket != null && _socket!.connected) {
-      _socket!.disconnect();
-    }
-    _addLog('Connecting to $url...');
-    try {
-      _socket = IO.io(url, <String, dynamic>{
-        'transports': ['websocket'],
-        'autoConnect': false,
-      });
-      _socket!.connect();
-      _socket!.onConnect((_) {
-        _addLog('Connected to Bot Server!');
-        setState(() {});
-      });
-      _socket!.onDisconnect((_) {
-        _addLog('Disconnected from Bot Server');
-        if (mounted) setState(() {});
-      });
-      _socket!.on('log', (data) => _addLog(data.toString()));
-      _socket!.onError((data) => _addLog('Socket Error: $data'));
-    } catch (e) {
-      _addLog('Connection failed: $e');
-    }
-  }
-
-  void _disconnectRemote() {
-    _socket?.disconnect();
-    _socket = null;
-    setState(() {});
+  void _removeCustomCommand(int index) {
+    final cmd = _customCommands[index];
+    setState(() {
+      _customCommands.removeAt(index);
+    });
+    _addLog('[System] コマンド削除: !${cmd['name']}');
   }
 
   @override
   Widget build(BuildContext context) {
-    final isDesktop = Platform.isWindows || Platform.isLinux || Platform.isMacOS;
-
     return DefaultTabController(
-      length: 2,
+      length: 3,
       child: Scaffold(
         appBar: AppBar(
-          leading: const Icon(Icons.smart_toy, color: Color(0xFF5865F2)),
-          title: const Text('Discord Bot Controller'),
+          leading: const Padding(
+            padding: EdgeInsets.all(12.0),
+            child: Icon(Icons.smart_toy, color: Color(0xFF5865F2)),
+          ),
+          title: const Text('Discord Bot'),
           backgroundColor: Theme.of(context).colorScheme.surface,
-          actions: [
-            if (_isRemoteConnected)
-               IconButton(icon: const Icon(Icons.link_off, color: Colors.green), onPressed: _disconnectRemote)
-          ],
           bottom: TabBar(
-            onTap: (index) {
-              setState(() => _tabIndex = index);
-              if (index == 1) _loadCode();
-            },
+            onTap: (index) => setState(() => _tabIndex = index),
             tabs: const [
-              Tab(icon: Icon(Icons.dashboard), text: 'Control'),
-              Tab(icon: Icon(Icons.code), text: 'Editor'),
+              Tab(icon: Icon(Icons.play_circle_outline), text: 'Control'),
+              Tab(icon: Icon(Icons.extension), text: 'Commands'),
+              Tab(icon: Icon(Icons.terminal), text: 'Logs'),
             ],
           ),
         ),
         body: IndexedStack(
           index: _tabIndex,
           children: [
-            _buildControlView(isDesktop),
-            _buildEditorView(),
+            _buildControlView(),
+            _buildCommandsView(),
+            _buildLogsView(),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildControlView(bool isDesktop) {
-    return Padding(
+  Widget _buildControlView() {
+    return SingleChildScrollView(
       padding: const EdgeInsets.all(16.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (isDesktop && !_isLocalRunning)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 16.0),
-              child: SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(value: 'Node', label: Text('Node.js'), icon: Icon(Icons.javascript)),
-                  ButtonSegment(value: 'Python', label: Text('Python'), icon: Icon(Icons.code)),
-                ],
-                selected: {_currentMode},
-                onSelectionChanged: (val) {
-                  setState(() => _currentMode = val.first);
-                  _loadCode();
-                },
+          // Status indicator
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: _botRunning 
+                ? const Color(0xFF57F287).withOpacity(0.15) 
+                : const Color(0xFFED4245).withOpacity(0.15),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: _botRunning 
+                  ? const Color(0xFF57F287).withOpacity(0.5) 
+                  : const Color(0xFFED4245).withOpacity(0.3),
               ),
             ),
-          if (isDesktop) ...[
-            Row(
+            child: Column(
               children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: _isLocalRunning ? null : _startLocalBot,
-                    icon: const Icon(Icons.play_arrow),
-                    label: Text('Start $_currentMode Bot'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF5865F2),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 20),
-                    ),
+                Icon(
+                  _botRunning ? Icons.check_circle : Icons.power_settings_new,
+                  size: 48,
+                  color: _botRunning ? const Color(0xFF57F287) : const Color(0xFFED4245),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _botRunning ? 'Bot is Online' : 'Bot is Offline',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: _botRunning ? const Color(0xFF57F287) : const Color(0xFFED4245),
                   ),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: _isLocalRunning ? _stopLocalBot : null,
-                    icon: const Icon(Icons.stop),
-                    label: const Text('Stop Bot'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red.shade100,
-                      padding: const EdgeInsets.symmetric(vertical: 20),
-                    ),
-                  ),
+                const SizedBox(height: 4),
+                Text(
+                  _botRunning ? 'Running on this device' : 'Tap Start to go online',
+                  style: TextStyle(color: Colors.grey.shade400),
                 ),
               ],
             ),
-            const Divider(height: 32),
-          ],
-          Text(isDesktop ? 'Remote Monitor' : 'Remote Connection', style: const TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
+          ),
+          const SizedBox(height: 24),
+
+          // Token input
+          TextField(
+            controller: _tokenController,
+            decoration: const InputDecoration(
+              labelText: 'Bot Token',
+              hintText: 'Discord Botのトークンを貼り付け',
+              border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.key),
+            ),
+            obscureText: true,
+            enabled: !_botRunning,
+          ),
+          const SizedBox(height: 12),
+
+          // Webhook URL input (optional)
+          TextField(
+            controller: _webhookController,
+            decoration: const InputDecoration(
+              labelText: 'Webhook URL (任意)',
+              hintText: 'ログ送信用 Webhook URL',
+              border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.webhook),
+            ),
+            enabled: !_botRunning,
+          ),
+          const SizedBox(height: 16),
+
+          // Start/Stop buttons
           Row(
             children: [
               Expanded(
-                child: TextField(
-                  controller: _ipController,
-                  decoration: const InputDecoration(
-                    labelText: 'IP Address',
-                    border: OutlineInputBorder(),
-                    hintText: 'localhost',
+                child: ElevatedButton.icon(
+                  onPressed: _botRunning ? null : _startBot,
+                  icon: const Icon(Icons.play_arrow),
+                  label: const Text('Start Bot'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF57F287),
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
-              ElevatedButton(
-                onPressed: _isRemoteConnected ? _disconnectRemote : _connectRemote,
-                child: Text(_isRemoteConnected ? 'Disconnect' : 'Connect'),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _botRunning ? _stopBot : null,
+                  icon: const Icon(Icons.stop),
+                  label: const Text('Stop Bot'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFED4245),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
               ),
             ],
           ),
-          if (_isRemoteConnected)
-             Padding(
-               padding: const EdgeInsets.only(top: 8.0),
-               child: ElevatedButton.icon(
-                  onPressed: _sendRemoteStop,
-                  icon: const Icon(Icons.power_settings_new),
-                  label: const Text('Remote Stop Bot'),
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.orange.shade100),
-               ),
-             ),
-          const SizedBox(height: 16),
-          const Text('Logs:', style: TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          Expanded(
-            child: Container(
-              decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(8)),
-              padding: const EdgeInsets.all(8),
-              child: ListView.builder(
-                controller: _scrollController,
-                itemCount: _logs.length,
-                itemBuilder: (context, index) => SelectableText(
-                  _logs[index],
-                  style: const TextStyle(color: Colors.greenAccent, fontFamily: 'Consolas', fontSize: 12),
+          const SizedBox(height: 24),
+
+          // Built-in commands info
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF5865F2).withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('📋 GG.py Commands', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                const SizedBox(height: 8),
+                _commandRow('/send', 'メッセージ送信 (Everyone設定可)'),
+                _commandRow('/spam', 'スパムパネル表示 (ボタンで開始)'),
+                const SizedBox(height: 8),
+                Text(
+                  '※ Discordのスラッシュコマンドメニューから実行してください',
+                  style: TextStyle(color: Colors.grey.shade400, fontSize: 12),
                 ),
-              ),
+              ],
             ),
           ),
         ],
@@ -377,7 +308,117 @@ class _BotControlPageState extends State<BotControlPage> {
     );
   }
 
-  Widget _buildEditorView() {
+  Widget _commandRow(String cmd, String desc) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: const Color(0xFF5865F2).withOpacity(0.3),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(cmd, style: const TextStyle(fontFamily: 'Consolas', fontWeight: FontWeight.bold)),
+          ),
+          const SizedBox(width: 8),
+          Text(desc, style: TextStyle(color: Colors.grey.shade400)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCommandsView() {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text('➕ Add Custom Command', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              const Text('!', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(width: 4),
+              Expanded(
+                flex: 2,
+                child: TextField(
+                  controller: _cmdNameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Command Name',
+                    hintText: 'e.g. help',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _cmdResponseController,
+            decoration: const InputDecoration(
+              labelText: 'Bot Response',
+              hintText: 'e.g. Here is a list of commands...',
+              border: OutlineInputBorder(),
+            ),
+            maxLines: 3,
+          ),
+          const SizedBox(height: 8),
+          ElevatedButton.icon(
+            onPressed: _addCustomCommand,
+            icon: const Icon(Icons.add),
+            label: const Text('Add Command'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF5865F2),
+              foregroundColor: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Divider(),
+          const SizedBox(height: 8),
+          Text('Custom Commands (${_customCommands.length})', 
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          const SizedBox(height: 8),
+          Expanded(
+            child: _customCommands.isEmpty
+              ? Center(
+                  child: Text(
+                    'No custom commands yet.\nAdd one above!',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.grey.shade500),
+                  ),
+                )
+              : ListView.builder(
+                  itemCount: _customCommands.length,
+                  itemBuilder: (context, index) {
+                    final cmd = _customCommands[index];
+                    return Card(
+                      child: ListTile(
+                        leading: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF5865F2).withOpacity(0.3),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text('!${cmd['name']}', style: const TextStyle(fontFamily: 'Consolas', fontWeight: FontWeight.bold)),
+                        ),
+                        title: Text(cmd['response']!, maxLines: 2, overflow: TextOverflow.ellipsis),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.delete, color: Color(0xFFED4245)),
+                          onPressed: () => _removeCustomCommand(index),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLogsView() {
     return Padding(
       padding: const EdgeInsets.all(16.0),
       child: Column(
@@ -385,27 +426,56 @@ class _BotControlPageState extends State<BotControlPage> {
         children: [
           Row(
             children: [
-              Text('Editing: $_currentMode Script', style: const TextStyle(fontWeight: FontWeight.bold)),
+              const Text('📜 Logs', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               const Spacer(),
-              ElevatedButton.icon(
-                onPressed: _saveCode,
-                icon: const Icon(Icons.save),
-                label: const Text('Save Code'),
+              TextButton.icon(
+                onPressed: () => setState(() => _logs.clear()),
+                icon: const Icon(Icons.delete_sweep, size: 18),
+                label: const Text('Clear'),
               ),
             ],
           ),
           const SizedBox(height: 8),
           Expanded(
-            child: TextField(
-              controller: _codeController,
-              maxLines: null,
-              expands: true,
-              style: const TextStyle(fontFamily: 'Consolas', fontSize: 13),
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
-                fillColor: Color(0xFFF5F5F5),
-                filled: true,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.black,
+                borderRadius: BorderRadius.circular(12),
               ),
+              padding: const EdgeInsets.all(8),
+              child: _logs.isEmpty
+                ? Center(
+                    child: Text(
+                      'No logs yet.\nStart the bot to see activity.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.grey.shade600),
+                    ),
+                  )
+                : ListView.builder(
+                    controller: _scrollController,
+                    itemCount: _logs.length,
+                    itemBuilder: (context, index) {
+                      final log = _logs[index];
+                      Color logColor = Colors.greenAccent;
+                      if (log.contains('[Error]') || log.contains('error') || log.contains('Failed')) {
+                        logColor = const Color(0xFFED4245);
+                      } else if (log.contains('[Bot]')) {
+                        logColor = const Color(0xFF5865F2);
+                      } else if (log.contains('[MSG]')) {
+                        logColor = const Color(0xFFFEE75C);
+                      } else if (log.contains('[System]')) {
+                        logColor = Colors.cyanAccent;
+                      }
+                      return SelectableText(
+                        log,
+                        style: TextStyle(
+                          color: logColor,
+                          fontFamily: 'Consolas',
+                          fontSize: 12,
+                        ),
+                      );
+                    },
+                  ),
             ),
           ),
         ],
