@@ -80,7 +80,19 @@ class _BotControlPageState extends State<BotControlPage> {
 
   Future<void> _initAudioSession() async {
     final session = await AudioSession.instance;
-    await session.configure(const AudioSessionConfiguration.music());
+    // Enable MixWithOthers to allow Youtube/Spotify to play alongside
+    await session.configure(const AudioSessionConfiguration(
+      avAudioSessionCategory: AVAudioSessionCategory.playback,
+      avAudioSessionCategoryOptions: AVAudioSessionCategoryOptions.mixWithOthers,
+      androidAudioAttributes: AndroidAudioAttributes(
+        contentType: AndroidAudioContentType.music,
+        flags: AndroidAudioFlags.none,
+        usage: AndroidAudioUsage.media,
+      ),
+      androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
+      androidWillPauseWhenDucked: true,
+    ));
+
     // Preload silence track (10 min silence)
     try {
       await _player.setUrl('https://github.com/anars/blank-audio/raw/master/10-minutes-of-silence.mp3');
