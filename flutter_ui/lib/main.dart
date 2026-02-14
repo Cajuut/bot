@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 import 'discord_bot.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:just_audio/just_audio.dart';
+import 'package:audio_session/audio_session.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 void main() {
   runApp(const MyApp());
@@ -49,9 +53,67 @@ class _BotControlPageState extends State<BotControlPage> {
   final TextEditingController _cmdNameController = TextEditingController();
   final TextEditingController _cmdResponseController = TextEditingController();
 
+  // Background Audio
+  final AudioPlayer _player = AudioPlayer();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+    _initAudioSession();
+    WakelockPlus.enable(); // Keep screen on (optional, but good for stability)
+  }
+
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _tokenController.text = prefs.getString('bot_token') ?? '';
+      _webhookController.text = prefs.getString('webhook_url') ?? '';
+    });
+  }
+
+  Future<void> _saveSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('bot_token', _tokenController.text.trim());
+    await prefs.setString('webhook_url', _webhookController.text.trim());
+  }
+
+  Future<void> _initAudioSession() async {
+    final session = await AudioSession.instance;
+    await session.configure(const AudioSessionConfiguration.music());
+    // Preload silence track (10 min silence)
+    try {
+      await _player.setUrl('https://github.com/anars/blank-audio/raw/master/10-minutes-of-silence.mp3');
+      await _player.setLoopMode(LoopMode.all);
+    } catch (e) {
+      debugPrint("Audio Init Error: $e");
+    }
+  }
+
+  Future<void> _startBackgroundAudio() async {
+    try {
+      if (!_player.playing) {
+        await _player.play();
+      }
+    } catch (e) {
+      _addLog('[Audio] Error: $e');
+    }
+  }
+
+  Future<void> _stopBackgroundAudio() async {
+    try {
+      if (_player.playing) {
+        await _player.pause();
+      }
+    } catch (e) {
+      _addLog('[Audio] Stop Error: $e');
+    }
+  }
+
   @override
   void dispose() {
     _bot?.stop();
+    _player.dispose();
     _tokenController.dispose();
     _webhookController.dispose();
     _scrollController.dispose();
@@ -106,10 +168,14 @@ class _BotControlPageState extends State<BotControlPage> {
     }
 
     _bot!.start();
+    _saveSettings(); // Save credentials on start
+    _startBackgroundAudio(); // Keep alive
   }
 
   void _stopBot() {
     _bot?.stop();
+    _stopBackgroundAudio();
+    setState(() => _botRunning = false);
   }
 
   void _addCustomCommand() {
