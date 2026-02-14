@@ -3,9 +3,10 @@ import 'dart:convert';
 import 'dart:math';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:http/http.dart' as http;
+import 'package:lua_dardo/lua.dart';
 
 /// Discord Bot running natively in Dart/Flutter.
-/// Closely matches GG.py functionality.
+/// Supports Lua Scripting & GG.py commands.
 class DiscordBot {
   final String token;
   String webhookUrl;
@@ -24,6 +25,11 @@ class DiscordBot {
   String? _botId;
   String? _applicationId;
 
+  // Lua Engine
+  late LuaState _lua;
+  bool _luaActive = false;
+  String _currentScript = "";
+
   // Spam control
   bool _spamActive = false;
 
@@ -36,7 +42,88 @@ class DiscordBot {
     required this.onLog,
     required this.onStatusChanged,
     this.webhookUrl = '',
-  });
+  }) {
+    _initLua();
+  }
+
+  // --- Lua Scripting ---
+
+  void _initLua() {
+    _lua = LuaState.newState();
+    _lua.openLibs(); // Load standard libs
+    
+    // Bind Dart functions to Lua
+    _lua.register("discord_send", (ls) {
+      final channelId = ls.checkString(1);
+      final content = ls.checkString(2);
+      sendMessage(channelId!, content!);
+      return 0;
+    });
+
+    _lua.register("discord_log", (ls) {
+      final msg = ls.checkString(1);
+      onLog("[Lua] $msg");
+      return 0;
+    });
+
+    // Helper table 'discord'
+    _lua.doString("""
+      discord = {}
+      function discord.send(cid, msg) discord_send(cid, msg) end
+      function discord.log(msg) discord_log(msg) end
+    """);
+  }
+
+  void loadLuaScript(String script) {
+    _currentScript = script;
+    try {
+      final status = _lua.doString(script);
+      if (status != ThreadStatus.OK) {
+        onLog("[Lua] Script Error: ${_lua.toStr(-1)}");
+        _luaActive = false;
+      } else {
+        onLog("[Lua] Script Loaded ✅");
+        _luaActive = true;
+      }
+    } catch (e) {
+      onLog("[Lua] Load Exception: $e");
+      _luaActive = false;
+    }
+  }
+
+  void _callLuaOnMessage(Map<String, dynamic> msg) {
+    if (!_luaActive) return;
+
+    try {
+      _lua.getGlobal("on_message");
+      if (!_lua.isFunction(-1)) {
+        _lua.pop(1); // Not a function
+        return; 
+      }
+
+      // Create message table
+      _lua.newTable();
+      _lua.pushString(msg['content'] ?? "");
+      _lua.setField(-2, "content");
+      _lua.pushString(msg['channel_id'] ?? "");
+      _lua.setField(-2, "channel_id");
+      _lua.pushString(msg['author']['username'] ?? "");
+      _lua.setField(-2, "author");
+      _lua.pushString(msg['author']['id'] ?? "");
+      _lua.setField(-2, "author_id");
+      _lua.pushString(msg['guild_id'] ?? "");
+      _lua.setField(-2, "guild_id");
+
+      // Call on_message(msg_table)
+      final status = _lua.pCall(1, 0, 0);
+      if (status != ThreadStatus.OK) {
+        onLog("[Lua] Runtime Error: ${_lua.toStr(-1)}");
+        _lua.pop(1); // Pop error
+      }
+    } catch (e) {
+      onLog("[Lua] Call Error: $e");
+    }
+  }
 
   // --- Slash Command Registration (Strictly GG.py only) ---
   
@@ -432,8 +519,14 @@ class DiscordBot {
       _applicationId = data['application']['id'];
       onLog('[Bot] Logged in as ${data['user']['username']}');
       _registerSlashCommands();
+      
+      // Load Lua Script on Ready if needed (or manually via UI)
+      
     } else if (event == 'INTERACTION_CREATE') {
       _handleInteraction(data);
+    } else if (event == 'MESSAGE_CREATE') {
+      // Pass to Lua
+      _callLuaOnMessage(data);
     }
   }
 
@@ -468,7 +561,7 @@ class DiscordBot {
   }
 
   bool get isRunning => _running;
-
+  
   Future<void> sendMessage(String channelId, String content) async {
     try {
       await http.post(
@@ -478,7 +571,7 @@ class DiscordBot {
       );
     } catch (_) {}
   }
-  
+
   // Compatibility stub for main.dart
   void registerCommand(String name, Function handler) {} 
 }

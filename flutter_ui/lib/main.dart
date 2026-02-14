@@ -50,7 +50,17 @@ class _BotControlPageState extends State<BotControlPage> {
 
   // Custom commands (user-defined)
   final List<Map<String, String>> _customCommands = [];
-  final TextEditingController _cmdNameController = TextEditingController();
+  // Lua Editor
+  final TextEditingController _luaScriptController = TextEditingController(text: '''
+-- Lua Script Example
+function on_message(msg)
+  if msg.content == "!ping" then
+    discord.send(msg.channel_id, "Pong from Lua! 🌙")
+  elseif msg.content == "!hello" then
+    discord.send(msg.channel_id, "Hello " .. msg.author .. "!")
+  end
+end
+''');
   final TextEditingController _cmdResponseController = TextEditingController();
 
   // Background Audio
@@ -69,6 +79,10 @@ class _BotControlPageState extends State<BotControlPage> {
     setState(() {
       _tokenController.text = prefs.getString('bot_token') ?? '';
       _webhookController.text = prefs.getString('webhook_url') ?? '';
+      final savedScript = prefs.getString('lua_script');
+      if (savedScript != null && savedScript.isNotEmpty) {
+        _luaScriptController.text = savedScript;
+      }
     });
   }
 
@@ -76,6 +90,7 @@ class _BotControlPageState extends State<BotControlPage> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('bot_token', _tokenController.text.trim());
     await prefs.setString('webhook_url', _webhookController.text.trim());
+    await prefs.setString('lua_script', _luaScriptController.text);
   }
 
   Future<void> _initAudioSession() async {
@@ -131,9 +146,9 @@ class _BotControlPageState extends State<BotControlPage> {
     _scrollController.dispose();
     _cmdNameController.dispose();
     _cmdResponseController.dispose();
+    _luaScriptController.dispose();
     super.dispose();
   }
-
   void _addLog(String message) {
     if (!mounted) return;
     setState(() {
@@ -179,9 +194,24 @@ class _BotControlPageState extends State<BotControlPage> {
       });
     }
 
+    });
+
     _bot!.start();
-    _saveSettings(); // Save credentials on start
-    _startBackgroundAudio(); // Keep alive
+    _saveSettings();
+    _startBackgroundAudio();
+    
+    // Auto-load Lua script on start
+    _applyLuaScript();
+  }
+
+  void _applyLuaScript() {
+    if (_bot != null && _bot!.isRunning) {
+      _bot!.loadLuaScript(_luaScriptController.text);
+      _addLog('[Lua] Script updated and applied.');
+      _saveSettings();
+    } else {
+      _addLog('[Lua] Bot is not running. Start bot first.');
+    }
   }
 
   void _stopBot() {
@@ -231,28 +261,77 @@ class _BotControlPageState extends State<BotControlPage> {
           ),
           title: const Text('Discord Bot'),
           backgroundColor: Theme.of(context).colorScheme.surface,
-          bottom: TabBar(
-            onTap: (index) => setState(() => _tabIndex = index),
-            tabs: const [
-              Tab(icon: Icon(Icons.play_circle_outline), text: 'Control'),
-              Tab(icon: Icon(Icons.extension), text: 'Commands'),
-              Tab(icon: Icon(Icons.terminal), text: 'Logs'),
+          bottom: const TabBar(
+            tabs: [
+              Tab(text: 'Control', icon: Icon(Icons.gamepad)),
+              Tab(text: 'Lua Script', icon: Icon(Icons.code)), // New Tab
+              Tab(text: 'Logs', icon: Icon(Icons.terminal)),
             ],
+            labelColor: Color(0xFF5865F2),
+            unselectedLabelColor: Colors.grey,
+            indicatorColor: Color(0xFF5865F2),
           ),
         ),
-        body: IndexedStack(
-          index: _tabIndex,
+        body: TabBarView(
           children: [
-            _buildControlView(),
-            _buildCommandsView(),
-            _buildLogsView(),
+            // Tab 1: Control
+            _buildControlTab(),
+            // Tab 2: Lua Editor
+            _buildLuaTab(), 
+            // Tab 3: Logs
+            _buildLogsTab(),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildControlView() {
+  Widget _buildLuaTab() {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        children: [
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFF2B2D31),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey.shade800),
+              ),
+              padding: const EdgeInsets.all(8),
+              child: TextField(
+                controller: _luaScriptController,
+                maxLines: null,
+                expands: true,
+                style: const TextStyle(fontFamily: 'monospace', color: Colors.white),
+                decoration: const InputDecoration(
+                  border: InputBorder.none,
+                  hintText: 'Write Lua code here...',
+                  hintStyle: TextStyle(color: Colors.grey),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: _applyLuaScript,
+              icon: const Icon(Icons.save),
+              label: const Text('Apply Script'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF5865F2),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildControlTab() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16.0),
       child: Column(
@@ -496,7 +575,7 @@ class _BotControlPageState extends State<BotControlPage> {
     );
   }
 
-  Widget _buildLogsView() {
+  Widget _buildLogsTab() {
     return Padding(
       padding: const EdgeInsets.all(16.0),
       child: Column(
