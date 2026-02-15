@@ -71,6 +71,7 @@ function onMessage(msg) {
 }
 ''');
   final TextEditingController _cmdResponseController = TextEditingController();
+  final TextEditingController _cmdNameController = TextEditingController();
 
   // Background Audio
   final AudioPlayer _player = AudioPlayer();

@@ -50,8 +50,12 @@ jobs:
         continue-on-error: true
         run: |
           cd flutter_ui
-          # Use Debug build which is more permissive with signing
-          flutter build ios --debug --no-codesign --no-pub
+          flutter build ios --debug --no-codesign --no-pub 2>&1 | tee build.log
+          
+          # Check if build succeeded
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            echo "flutter_build_failed=true" >> $GITHUB_ENV
+          fi
 
       - name: Create IPA
         run: |
