@@ -26,6 +26,7 @@ jobs:
         run: |
           cd flutter_ui/ios
           # Disable code signing in Xcode project settings
+          sed -i '' 's/ProvisioningStyle = Automatic;/ProvisioningStyle = Manual;/g' Runner.xcodeproj/project.pbxproj
           sed -i '' 's/CODE_SIGN_IDENTITY = "Apple Development";/CODE_SIGN_IDENTITY = "";/g' Runner.xcodeproj/project.pbxproj
           sed -i '' 's/CODE_SIGN_IDENTITY = "iPhone Developer";/CODE_SIGN_IDENTITY = "";/g' Runner.xcodeproj/project.pbxproj
           # Set signing to manual and disable
