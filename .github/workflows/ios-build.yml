@@ -35,6 +35,16 @@ jobs:
           # Add CODE_SIGNING_ALLOWED = NO to build settings
           sed -i '' 's/PRODUCT_BUNDLE_IDENTIFIER/CODE_SIGNING_REQUIRED = NO;\n\t\t\t\tCODE_SIGNING_ALLOWED = NO;\n\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER/g' Runner.xcodeproj/project.pbxproj
           
+          # Explicitly disable signing in xcconfig files as well
+          echo "CODE_SIGNING_ALLOWED=NO" >> Flutter/Debug.xcconfig
+          echo "CODE_SIGNING_REQUIRED=NO" >> Flutter/Debug.xcconfig
+          echo "CODE_SIGN_IDENTITY=" >> Flutter/Debug.xcconfig
+          echo "PROVISIONING_PROFILE=" >> Flutter/Debug.xcconfig
+          echo "CODE_SIGNING_ALLOWED=NO" >> Flutter/Release.xcconfig
+          echo "CODE_SIGNING_REQUIRED=NO" >> Flutter/Release.xcconfig
+          echo "CODE_SIGN_IDENTITY=" >> Flutter/Release.xcconfig
+          echo "PROVISIONING_PROFILE=" >> Flutter/Release.xcconfig
+          
       - name: Build iOS
         id: build_ios
         continue-on-error: true
@@ -61,6 +71,7 @@ jobs:
               -scheme Runner \
               -configuration Debug \
               -sdk iphoneos \
+              -derivedDataPath build \
               CODE_SIGNING_ALLOWED=NO \
               CODE_SIGNING_REQUIRED=NO \
               CODE_SIGN_IDENTITY="" \
