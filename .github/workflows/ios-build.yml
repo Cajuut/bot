@@ -81,16 +81,31 @@ jobs:
             # Go back and find the app
             cd ..
             
-            # Allow finding it
-            APP_PATH=$(find ios/build -name "Runner.app" -type d | head -n 1)
-             if [ -z "$APP_PATH" ]; then
-                APP_PATH="build/ios/iphoneos/Runner.app"
-             fi
+            # Allow finding it - search broadly in ios folder as derived path structure can vary
+            echo "Searching for Runner.app..."
+            
+            # Use find but exclude some dirs to be faster/safer if needed, or just search ios/build
+            # We used -derivedDataPath build, so it should be in ios/build/Build/Products/Debug-iphoneos/
+            
+            APP_PATH=""
+            if [ -d "ios/build/Build/Products/Debug-iphoneos/Runner.app" ]; then
+              APP_PATH="ios/build/Build/Products/Debug-iphoneos/Runner.app"
+            elif [ -d "build/ios/iphoneos/Runner.app" ]; then
+              APP_PATH="build/ios/iphoneos/Runner.app"
+            else
+              # Last resort find
+              APP_PATH=$(find ios -name "Runner.app" -type d | head -n 1)
+            fi
+            
+            echo "Found Runner.app at: $APP_PATH"
              
             if [ -d "$APP_PATH" ]; then
                cp -r "$APP_PATH" Payload/
             else
                echo "Build failed completely. No Runner.app found."
+               # List directories to help debug
+               echo "Directory structure of ios/build:"
+               ls -R ios/build || echo "ios/build not found"
                exit 1
             fi
           fi
