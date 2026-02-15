@@ -209,8 +209,6 @@ function onMessage(msg) {
       });
     }
 
-    });
-
     _bot!.start();
     _saveSettings();
     _startBackgroundAudio();
