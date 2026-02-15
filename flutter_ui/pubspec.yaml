@@ -43,6 +43,7 @@ dependencies:
   audio_session: ^0.2.2
   wakelock_plus: ^1.4.0
   lua_dardo: ^0.0.5
+  flutter_js: ^0.8.7
 
 dev_dependencies:
   flutter_test:

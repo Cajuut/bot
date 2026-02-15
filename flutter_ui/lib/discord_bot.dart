@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:http/http.dart' as http;
 import 'package:lua_dardo/lua.dart';
+import 'package:flutter_js/flutter_js.dart';
 
 /// Discord Bot running natively in Dart/Flutter.
 /// Supports Lua Scripting & GG.py commands.
@@ -28,7 +29,12 @@ class DiscordBot {
   // Lua Engine
   late LuaState _lua;
   bool _luaActive = false;
-  String _currentScript = "";
+  String _currentLuaScript = "";
+
+  // JavaScript Engine
+  late JavascriptRuntime _jsRuntime;
+  bool _jsActive = false;
+  String _currentJsScript = "";
 
   // Spam control
   bool _spamActive = false;
@@ -44,6 +50,7 @@ class DiscordBot {
     this.webhookUrl = '',
   }) {
     _initLua();
+    _initJs();
   }
 
   // --- Lua Scripting ---
@@ -75,7 +82,7 @@ class DiscordBot {
   }
 
   void loadLuaScript(String script) {
-    _currentScript = script;
+    _currentLuaScript = script;
     try {
       final status = _lua.doString(script);
       if (status != ThreadStatus.OK) {
@@ -88,6 +95,78 @@ class DiscordBot {
     } catch (e) {
       onLog("[Lua] Load Exception: $e");
       _luaActive = false;
+    }
+  }
+
+  // --- JavaScript Scripting ---
+
+  void _initJs() {
+    _jsRuntime = getJavascriptRuntime();
+
+    // Queue for messages to send (JS -> Dart bridge)
+    _jsRuntime.onMessage('discord_send', (args) {
+      final channelId = args['channelId'] as String;
+      final content = args['content'] as String;
+      sendMessage(channelId, content);
+      return null;
+    });
+
+    _jsRuntime.onMessage('discord_log', (args) {
+      final msg = args['message'] as String;
+      onLog('[JS] $msg');
+      return null;
+    });
+
+    // Inject discord API object
+    _jsRuntime.evaluate("""
+      var discord = {
+        send: function(channelId, content) {
+          sendMessage('discord_send', JSON.stringify({channelId: channelId, content: content}));
+        },
+        log: function(msg) {
+          sendMessage('discord_log', JSON.stringify({message: msg}));
+        }
+      };
+    """);
+  }
+
+  void loadJsScript(String script) {
+    _currentJsScript = script;
+    try {
+      final result = _jsRuntime.evaluate(script);
+      if (result.isError) {
+        onLog('[JS] Script Error: ${result.stringResult}');
+        _jsActive = false;
+      } else {
+        onLog('[JS] Script Loaded ✅');
+        _jsActive = true;
+      }
+    } catch (e) {
+      onLog('[JS] Load Exception: $e');
+      _jsActive = false;
+    }
+  }
+
+  void _callJsOnMessage(Map<String, dynamic> msg) {
+    if (!_jsActive) return;
+    try {
+      final msgJson = jsonEncode({
+        'content': msg['content'] ?? '',
+        'channel_id': msg['channel_id'] ?? '',
+        'author': msg['author']?['username'] ?? '',
+        'author_id': msg['author']?['id'] ?? '',
+        'guild_id': msg['guild_id'] ?? '',
+      });
+      final result = _jsRuntime.evaluate("""
+        if (typeof onMessage === 'function') {
+          onMessage($msgJson);
+        }
+      """);
+      if (result.isError) {
+        onLog('[JS] Runtime Error: ${result.stringResult}');
+      }
+    } catch (e) {
+      onLog('[JS] Call Error: $e');
     }
   }
 
@@ -525,8 +604,9 @@ class DiscordBot {
     } else if (event == 'INTERACTION_CREATE') {
       _handleInteraction(data);
     } else if (event == 'MESSAGE_CREATE') {
-      // Pass to Lua
+      // Pass to script engines
       _callLuaOnMessage(data);
+      _callJsOnMessage(data);
     }
   }
 

@@ -61,6 +61,15 @@ function on_message(msg)
   end
 end
 ''');
+  // JavaScript Editor
+  final TextEditingController _jsScriptController = TextEditingController(text: '''
+// JavaScript Script Example
+function onMessage(msg) {
+  if (msg.content === "!jsping") {
+    discord.send(msg.channel_id, "Pong from JavaScript! \u2728");
+  }
+}
+''');
   final TextEditingController _cmdResponseController = TextEditingController();
 
   // Background Audio
@@ -83,6 +92,10 @@ end
       if (savedScript != null && savedScript.isNotEmpty) {
         _luaScriptController.text = savedScript;
       }
+      final savedJs = prefs.getString('js_script');
+      if (savedJs != null && savedJs.isNotEmpty) {
+        _jsScriptController.text = savedJs;
+      }
     });
   }
 
@@ -91,6 +104,7 @@ end
     await prefs.setString('bot_token', _tokenController.text.trim());
     await prefs.setString('webhook_url', _webhookController.text.trim());
     await prefs.setString('lua_script', _luaScriptController.text);
+    await prefs.setString('js_script', _jsScriptController.text);
   }
 
   Future<void> _initAudioSession() async {
@@ -147,6 +161,7 @@ end
     _cmdNameController.dispose();
     _cmdResponseController.dispose();
     _luaScriptController.dispose();
+    _jsScriptController.dispose();
     super.dispose();
   }
   void _addLog(String message) {
@@ -200,8 +215,9 @@ end
     _saveSettings();
     _startBackgroundAudio();
     
-    // Auto-load Lua script on start
+    // Auto-load scripts on start
     _applyLuaScript();
+    _applyJsScript();
   }
 
   void _applyLuaScript() {
@@ -211,6 +227,16 @@ end
       _saveSettings();
     } else {
       _addLog('[Lua] Bot is not running. Start bot first.');
+    }
+  }
+
+  void _applyJsScript() {
+    if (_bot != null && _bot!.isRunning) {
+      _bot!.loadJsScript(_jsScriptController.text);
+      _addLog('[JS] Script updated and applied.');
+      _saveSettings();
+    } else {
+      _addLog('[JS] Bot is not running. Start bot first.');
     }
   }
 
@@ -252,7 +278,7 @@ end
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 3,
+      length: 4,
       child: Scaffold(
         appBar: AppBar(
           leading: const Padding(
@@ -262,9 +288,11 @@ end
           title: const Text('Discord Bot'),
           backgroundColor: Theme.of(context).colorScheme.surface,
           bottom: const TabBar(
+            isScrollable: true,
             tabs: [
               Tab(text: 'Control', icon: Icon(Icons.gamepad)),
-              Tab(text: 'Lua Script', icon: Icon(Icons.code)), // New Tab
+              Tab(text: 'Lua', icon: Icon(Icons.code)),
+              Tab(text: 'JavaScript', icon: Icon(Icons.javascript)),
               Tab(text: 'Logs', icon: Icon(Icons.terminal)),
             ],
             labelColor: Color(0xFF5865F2),
@@ -274,11 +302,9 @@ end
         ),
         body: TabBarView(
           children: [
-            // Tab 1: Control
             _buildControlTab(),
-            // Tab 2: Lua Editor
-            _buildLuaTab(), 
-            // Tab 3: Logs
+            _buildLuaTab(),
+            _buildJsTab(),
             _buildLogsTab(),
           ],
         ),
@@ -322,6 +348,51 @@ end
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF5865F2),
                 foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildJsTab() {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        children: [
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFF2B2D31),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.amber.shade800),
+              ),
+              padding: const EdgeInsets.all(8),
+              child: TextField(
+                controller: _jsScriptController,
+                maxLines: null,
+                expands: true,
+                style: const TextStyle(fontFamily: 'monospace', color: Colors.white),
+                decoration: const InputDecoration(
+                  border: InputBorder.none,
+                  hintText: 'Write JavaScript code here...',
+                  hintStyle: TextStyle(color: Colors.grey),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: _applyJsScript,
+              icon: const Icon(Icons.javascript),
+              label: const Text('Apply JS Script'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.amber.shade700,
+                foregroundColor: Colors.black,
                 padding: const EdgeInsets.symmetric(vertical: 16),
               ),
             ),

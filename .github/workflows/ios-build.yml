@@ -16,17 +16,27 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-          # specific version removed to use latest stable
           
       - name: Install dependencies
         run: |
           cd flutter_ui
           flutter pub get
+
+      - name: Disable Code Signing
+        run: |
+          cd flutter_ui/ios
+          # Disable code signing in Xcode project settings
+          sed -i '' 's/CODE_SIGN_IDENTITY = "Apple Development";/CODE_SIGN_IDENTITY = "";/g' Runner.xcodeproj/project.pbxproj
+          sed -i '' 's/CODE_SIGN_IDENTITY = "iPhone Developer";/CODE_SIGN_IDENTITY = "";/g' Runner.xcodeproj/project.pbxproj
+          # Set signing to manual and disable
+          sed -i '' 's/DEVELOPMENT_TEAM = .*;/DEVELOPMENT_TEAM = "";/g' Runner.xcodeproj/project.pbxproj
+          sed -i '' 's/"DEVELOPMENT_TEAM\[sdk=iphoneos\*\]" = .*;/"DEVELOPMENT_TEAM[sdk=iphoneos*]" = "";/g' Runner.xcodeproj/project.pbxproj
+          # Add CODE_SIGNING_ALLOWED = NO to build settings
+          sed -i '' 's/PRODUCT_BUNDLE_IDENTIFIER/CODE_SIGNING_REQUIRED = NO;\n\t\t\t\tCODE_SIGNING_ALLOWED = NO;\n\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER/g' Runner.xcodeproj/project.pbxproj
           
       - name: Build iOS
         run: |
           cd flutter_ui
-          # Build without code signing (for sideloading)
           flutter build ios --release --no-codesign
           
       - name: Create IPA
