@@ -85,7 +85,7 @@ class DiscordBot {
     _currentLuaScript = script;
     try {
       final status = _lua.doString(script);
-      if (status != ThreadStatus.LUA_OK) {
+      if (status != 0) {
         onLog("[Lua] Script Error: ${_lua.toStr(-1)}");
         _luaActive = false;
       } else {
@@ -195,7 +195,7 @@ class DiscordBot {
 
       // Call on_message(msg_table)
       final status = _lua.pCall(1, 0, 0);
-      if (status != ThreadStatus.LUA_OK) {
+      if (status != 0) {
         onLog("[Lua] Runtime Error: ${_lua.toStr(-1)}");
         _lua.pop(1); // Pop error
       }
