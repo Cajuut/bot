@@ -36,15 +36,56 @@ jobs:
           sed -i '' 's/PRODUCT_BUNDLE_IDENTIFIER/CODE_SIGNING_REQUIRED = NO;\n\t\t\t\tCODE_SIGNING_ALLOWED = NO;\n\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER/g' Runner.xcodeproj/project.pbxproj
           
       - name: Build iOS
+        id: build_ios
+        continue-on-error: true
         run: |
           cd flutter_ui
-          flutter build ios --release --no-codesign
-          
+          flutter build ios --release --no-codesign --no-pub
+
       - name: Create IPA
         run: |
           cd flutter_ui
           mkdir -p Payload
-          cp -r build/ios/iphoneos/Runner.app Payload/
+          
+          # Check if flutter build succeeded
+          if [ -d "build/ios/iphoneos/Runner.app" ]; then
+            echo "Flutter build succeeded. Packaging..."
+            cp -r build/ios/iphoneos/Runner.app Payload/
+          else
+            echo "Flutter build failed (likely signing error). Falling back to xcodebuild..."
+            
+            # Direct xcodebuild with forced unsigned settings
+            cd ios
+            xcodebuild -workspace Runner.xcworkspace \
+              -scheme Runner \
+              -configuration Release \
+              -sdk iphoneos \
+              CODE_SIGNING_ALLOWED=NO \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGN_IDENTITY="" \
+              PROVISIONING_PROFILE="" \
+              build
+            
+            # Go back and find the app
+            cd ..
+            # xcodebuild output might be in a different place depending on derived data
+            # Typically ios/build/Release-iphoneos/Runner.app or generic build dir
+            
+            # Allow finding it
+            APP_PATH=$(find ios/build -name "Runner.app" -type d | head -n 1)
+             if [ -z "$APP_PATH" ]; then
+                # Default flutter path if xcodebuild put it there
+                APP_PATH="build/ios/iphoneos/Runner.app"
+             fi
+             
+            if [ -d "$APP_PATH" ]; then
+               cp -r "$APP_PATH" Payload/
+            else
+               echo "Build failed completely. No Runner.app found."
+               exit 1
+            fi
+          fi
+          
           zip -r DiscordBotController.ipa Payload
           
       - name: Upload Artifact
