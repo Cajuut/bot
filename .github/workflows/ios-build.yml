@@ -50,7 +50,7 @@ jobs:
         continue-on-error: true
         run: |
           cd flutter_ui
-          flutter build ios --debug --no-codesign --no-pub 2>&1 | tee build.log
+          flutter build ios --release --no-codesign --no-pub 2>&1 | tee build.log
           
           # Check if build succeeded
           if [ ${PIPESTATUS[0]} -ne 0 ]; then
@@ -62,18 +62,18 @@ jobs:
           cd flutter_ui
           mkdir -p Payload
           
-          # Check if flutter build succeeded
+          # Check if flutter build succeeded (Release path)
           if [ -d "build/ios/iphoneos/Runner.app" ]; then
             echo "Flutter build succeeded. Packaging..."
             cp -r build/ios/iphoneos/Runner.app Payload/
           else
             echo "Flutter build failed. Falling back to xcodebuild..."
             
-            # Direct xcodebuild with forced unsigned settings (DEBUG)
+            # Direct xcodebuild with forced unsigned settings (RELEASE)
             cd ios
             xcodebuild -workspace Runner.xcworkspace \
               -scheme Runner \
-              -configuration Debug \
+              -configuration Release \
               -sdk iphoneos \
               -derivedDataPath build \
               CODE_SIGNING_ALLOWED=NO \
@@ -85,20 +85,17 @@ jobs:
             # Go back and find the app
             cd ..
             
-            # Allow finding it - search broadly in ios folder as derived path structure can vary
-            echo "Searching for Runner.app..."
-            
-            # Use find but exclude some dirs to be faster/safer if needed, or just search ios/build
-            # We used -derivedDataPath build, so it should be in ios/build/Build/Products/Debug-iphoneos/
-            
             APP_PATH=""
-            if [ -d "ios/build/Build/Products/Debug-iphoneos/Runner.app" ]; then
-              APP_PATH="ios/build/Build/Products/Debug-iphoneos/Runner.app"
+            if [ -d "ios/build/Build/Products/Release-iphoneos/Runner.app" ]; then
+              APP_PATH="ios/build/Build/Products/Release-iphoneos/Runner.app"
             elif [ -d "build/ios/iphoneos/Runner.app" ]; then
               APP_PATH="build/ios/iphoneos/Runner.app"
             else
               # Last resort find
-              APP_PATH=$(find ios -name "Runner.app" -type d | head -n 1)
+              APP_PATH=$(find ios -name "Runner.app" -type d | grep "Release-iphoneos" | head -n 1)
+              if [ -z "$APP_PATH" ]; then
+                APP_PATH=$(find ios -name "Runner.app" -type d | head -n 1)
+              fi
             fi
             
             echo "Found Runner.app at: $APP_PATH"
@@ -107,7 +104,6 @@ jobs:
                cp -r "$APP_PATH" Payload/
             else
                echo "Build failed completely. No Runner.app found."
-               # List directories to help debug
                echo "Directory structure of ios/build:"
                ls -R ios/build || echo "ios/build not found"
                exit 1
